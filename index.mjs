@@ -66,7 +66,7 @@ if (!src.isFile && !dest.isFile) {
         console.log(`Table ${dest.table} not found in destination connection ${dest.connection}.`);
         console.log('Creating target table...');
         console.log('Utility has limitations on creating tables. Please make sure the table is created with the correct schema.');
-        const statement = await generateCreateTableQuery(src);
+        const statement = await generateCreateTableQuery({ columns: src.columns, table: dest.table });
         dest.pool.request().query(statement);
     } else {
         src.columns.forEach((column, index) => {
@@ -120,8 +120,7 @@ if (!dest.isFile) {
     await util.execCommand(cmd);
 }
 
-async function generateCreateTableQuery(conn) {
-    const { columns, table } = conn;
+async function generateCreateTableQuery({ columns, table }) {
     const columnInfo = [];
     for (const column of columns) {
         let columnStatemet = `    ${column.COLUMN_NAME} ${column.DATA_TYPE}`;
