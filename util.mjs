@@ -5,6 +5,15 @@ const defaultTemplate = /\${((\w+)\.)?(\w+)}/gm;
 
 const util = {
 
+    fileExists: async (file) => {
+        try {
+            await fs.stat(file);
+            return true;
+        } catch (error) {
+            return false;
+        }
+    },
+
     loadConfig: async ([...paths]) => {
         const config = {};
         for (const file of paths) {

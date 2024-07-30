@@ -21,43 +21,74 @@ if (!src.connection || !src.table || !dest.connection || !dest.table) {
 }
 
 if (src.connection === dest.connection && src.table === dest.table) {
-    console.log('Source and destination tables are the same');
+    console.error('Source and destination tables are the same');
     process.exit(1);
 }
 
-await initConnection(src);
-if (!src.columns || !src.columns.length) {
-    console.log(`Table ${src.table} not found in source connection ${src.connection}.`);
+if (src.connection === "file") {
+    src.isFile = true;
+}
+
+if (dest.connection === "file") {
+    dest.isFile = true;
+}
+
+if (src.connection === "file" && dest.connection === "file") {
+    console.error('Source and destination connections cannot be both file');
     process.exit(1);
 }
-await initConnection(dest);
-const errors = [];
-if (!dest.columns || !dest.columns.length) {
-    console.log(`Table ${dest.table} not found in destination connection ${dest.connection}.`);
-    console.log('Creating target table...');
-    console.log('Utility has limitations on creating tables. Please make sure the table is created with the correct schema.');
-    const statement = await generateCreateTableQuery(src);
-    dest.pool.request().query(statement);
+
+if (src.isFile) {
+    if (!(await util.fileExists(src.table))) {
+        console.error(`Source file ${src.table} not found`);
+        process.exit(1);
+    }
 } else {
-    src.columns.forEach((column, index) => {
-        const destColumn = dest.columns.find((destColumn) => destColumn.COLUMN_NAME === column.COLUMN_NAME);
-        let error;
-        if (!destColumn) {
-            error = 'Column not found in destination database';
-        } else if (destColumn.DATA_TYPE !== column.DATA_TYPE || destColumn.CHARACTER_MAXIMUM_LENGTH !== column.CHARACTER_MAXIMUM_LENGTH) {
-            error = `Data type mismatch ${destColumn.DATA_TYPE} ${destColumn.CHARACTER_MAXIMUM_LENGTH} != ${column.DATA_TYPE} ${column.CHARACTER_MAXIMUM_LENGTH}`;
-        }
-        if (error) {
-            errors.push(`${column.COLUMN_NAME}: ${error}`);
-            return true;
-        }
-    });
-    dest.columns.forEach((column, index) => {
-        const srcColumn = src.columns.find((srcColumn) => srcColumn.COLUMN_NAME === column.COLUMN_NAME);
-        if (!srcColumn) {
-            errors.push(`Extra column found in destination database: ${column.COLUMN_NAME}`);
-        }
-    });
+    await initConnection(src);
+    if (!src.columns || !src.columns.length) {
+        console.error(`Table ${src.table} not found in source connection ${src.connection}.`);
+        process.exit(1);
+    }
+}
+
+if (dest.isFile) {
+    if (await util.fileExists(dest.table)) {
+        console.error(`Destination file ${dest.table} already exists`);
+        process.exit(1);
+    }
+} else {
+    await initConnection(dest);
+}
+
+const errors = [];
+if (!src.isFile && !dest.isFile) {
+    if (!dest.columns || !dest.columns.length) {
+        console.log(`Table ${dest.table} not found in destination connection ${dest.connection}.`);
+        console.log('Creating target table...');
+        console.log('Utility has limitations on creating tables. Please make sure the table is created with the correct schema.');
+        const statement = await generateCreateTableQuery(src);
+        dest.pool.request().query(statement);
+    } else {
+        src.columns.forEach((column, index) => {
+            const destColumn = dest.columns.find((destColumn) => destColumn.COLUMN_NAME === column.COLUMN_NAME);
+            let error;
+            if (!destColumn) {
+                error = 'Column not found in destination database';
+            } else if (destColumn.DATA_TYPE !== column.DATA_TYPE || destColumn.CHARACTER_MAXIMUM_LENGTH !== column.CHARACTER_MAXIMUM_LENGTH) {
+                error = `Data type mismatch ${destColumn.DATA_TYPE} ${destColumn.CHARACTER_MAXIMUM_LENGTH} != ${column.DATA_TYPE} ${column.CHARACTER_MAXIMUM_LENGTH}`;
+            }
+            if (error) {
+                errors.push(`${column.COLUMN_NAME}: ${error}`);
+                return true;
+            }
+        });
+        dest.columns.forEach((column, index) => {
+            const srcColumn = src.columns.find((srcColumn) => srcColumn.COLUMN_NAME === column.COLUMN_NAME);
+            if (!srcColumn) {
+                errors.push(`Extra column found in destination database: ${column.COLUMN_NAME}`);
+            }
+        });
+    }
 }
 
 if (errors.length) {
@@ -66,22 +97,28 @@ if (errors.length) {
     }
     process.exit(2);
 }
-const existingRows = await dest.pool.request().query(`SELECT COUNT(*) AS count FROM ${dest.table}`);
-const existingRowsCount = existingRows.recordset[0].count;
-if (existingRowsCount) {
-    console.log(`Table ${dest.table} already has ${existingRowsCount} rows. Aborting...`);
-    process.exit(3);
+if (!dest.isFile) {
+    const existingRows = await dest.pool.request().query(`SELECT COUNT(*) AS count FROM ${dest.table}`);
+    const existingRowsCount = existingRows.recordset[0].count;
+    if (existingRowsCount) {
+        console.error(`Table ${dest.table} already has ${existingRowsCount} rows. Aborting...`);
+        process.exit(3);
+    }
 }
 
 let cmd;
-console.log(`Fetching data from ${src.connection} ${src.pool.config.database} > ${src.table}...`);
-cmd = util.replaceTags(config.commands.download, { sourceTable: src.table, tempFileName: 'tmp.bcp', ...src.pool.config, batchSize: argv.batchSize });
-console.log(cmd);
-await util.execCommand(cmd);
-console.log(`Pusing data to ${dest.connection} ${dest.pool.config.database} > ${dest.table}...`);
-cmd = util.replaceTags(config.commands.upload, { targetTable: dest.table, tempFileName: 'tmp.bcp', ...dest.pool.config, batchSize: argv.batchSize });
-console.log(cmd);
-await util.execCommand(cmd);
+if (!src.isFile) {
+    console.log(`Fetching data from ${src.connection} ${src.pool.config.database} > ${src.table}...`);
+    cmd = util.replaceTags(config.commands.download, { sourceTable: src.table, tempFileName: dest.isFile ? dest.table : 'tmp.bcp', ...src.pool.config, batchSize: argv.batchSize });
+    console.log(cmd);
+    await util.execCommand(cmd);
+}
+if (!dest.isFile) {
+    console.log(`Pushing data to ${dest.connection} ${dest.pool.config.database} > ${dest.table}...`);
+    cmd = util.replaceTags(config.commands.upload, { targetTable: dest.table, tempFileName: src.isFile ? src.table : 'tmp.bcp', ...dest.pool.config, batchSize: argv.batchSize });
+    console.log(cmd);
+    await util.execCommand(cmd);
+}
 
 async function generateCreateTableQuery(conn) {
     const { columns, table } = conn;

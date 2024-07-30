@@ -14,11 +14,19 @@ Copy .config.json to .config.local.json and then specify your connection strings
 node index.mjs --src source:sampleTable --dest target:sampleTable --batchSize 10000 
 ```
 
-Here:
---src           source:sampleTable source is the name of connectionString and sampleTable is the source table name
---dest          target:sampleTable target is the name of connectionString and sampleTable is the destination table name
---batchSize     Set bcp batchSize
+Parameters:
 
+```
+src:        source:sampleTable source is the name of connectionString and sampleTable is the source table name
+dest:       target:sampleTable target is the name of connectionString and sampleTable is the destination table name  
+batchSize:  Set bcp batchSize  
+```
+
+Notes:
+
+Use file as the name of connectionString to use file as source or target. When using file, table name is the file name. Example:   
+
+```node index.mjs --src source:sampleTable --dest file:./sampleTable.bcp```
 
 # Limitations
 
