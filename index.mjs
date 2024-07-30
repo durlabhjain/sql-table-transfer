@@ -4,6 +4,8 @@ import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
 import util from './util.mjs';
 import poolManager from './pool-manager.mjs';
+import path from 'path';
+import fs from 'fs/promises';
 
 
 const argv = yargs(hideBin(process.argv)).argv
@@ -61,33 +63,39 @@ if (dest.isFile) {
 }
 
 const errors = [];
-if (!src.isFile && !dest.isFile) {
-    if (!dest.columns || !dest.columns.length) {
-        console.log(`Table ${dest.table} not found in destination connection ${dest.connection}.`);
-        console.log('Creating target table...');
-        console.log('Utility has limitations on creating tables. Please make sure the table is created with the correct schema.');
-        const statement = await generateCreateTableQuery({ columns: src.columns, table: dest.table });
-        dest.pool.request().query(statement);
+if (!src.isFile) {
+    const tableCreateStatement = await generateCreateTableQuery({ columns: src.columns, table: dest.table });
+    if (dest.isFile) {
+        const sqlFile = path.basename(dest.table) + '-create.sql';
+        console.log(`Writing create table SQL to ${sqlFile}`);
+        await fs.writeFile(sqlFile, tableCreateStatement);
     } else {
-        src.columns.forEach((column, index) => {
-            const destColumn = dest.columns.find((destColumn) => destColumn.COLUMN_NAME === column.COLUMN_NAME);
-            let error;
-            if (!destColumn) {
-                error = 'Column not found in destination database';
-            } else if (destColumn.DATA_TYPE !== column.DATA_TYPE || destColumn.CHARACTER_MAXIMUM_LENGTH !== column.CHARACTER_MAXIMUM_LENGTH) {
-                error = `Data type mismatch ${destColumn.DATA_TYPE} ${destColumn.CHARACTER_MAXIMUM_LENGTH} != ${column.DATA_TYPE} ${column.CHARACTER_MAXIMUM_LENGTH}`;
-            }
-            if (error) {
-                errors.push(`${column.COLUMN_NAME}: ${error}`);
-                return true;
-            }
-        });
-        dest.columns.forEach((column, index) => {
-            const srcColumn = src.columns.find((srcColumn) => srcColumn.COLUMN_NAME === column.COLUMN_NAME);
-            if (!srcColumn) {
-                errors.push(`Extra column found in destination database: ${column.COLUMN_NAME}`);
-            }
-        });
+        if (!dest.columns || !dest.columns.length) {
+            console.log(`Table ${dest.table} not found in destination connection ${dest.connection}.`);
+            console.log('Creating target table...');
+            console.log('Utility has limitations on creating tables. Please make sure the table is created with the correct schema.');
+            dest.pool.request().query(tableCreateStatement);
+        } else {
+            src.columns.forEach((column, index) => {
+                const destColumn = dest.columns.find((destColumn) => destColumn.COLUMN_NAME === column.COLUMN_NAME);
+                let error;
+                if (!destColumn) {
+                    error = 'Column not found in destination database';
+                } else if (destColumn.DATA_TYPE !== column.DATA_TYPE || destColumn.CHARACTER_MAXIMUM_LENGTH !== column.CHARACTER_MAXIMUM_LENGTH) {
+                    error = `Data type mismatch ${destColumn.DATA_TYPE} ${destColumn.CHARACTER_MAXIMUM_LENGTH} != ${column.DATA_TYPE} ${column.CHARACTER_MAXIMUM_LENGTH}`;
+                }
+                if (error) {
+                    errors.push(`${column.COLUMN_NAME}: ${error}`);
+                    return true;
+                }
+            });
+            dest.columns.forEach((column, index) => {
+                const srcColumn = src.columns.find((srcColumn) => srcColumn.COLUMN_NAME === column.COLUMN_NAME);
+                if (!srcColumn) {
+                    errors.push(`Extra column found in destination database: ${column.COLUMN_NAME}`);
+                }
+            });
+        }
     }
 }
 
